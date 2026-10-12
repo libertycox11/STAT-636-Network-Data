@@ -1,2 +1,2 @@
 # Rhea
-# set your workng directory
+# set your working directory
