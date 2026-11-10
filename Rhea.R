@@ -18,7 +18,8 @@ mean(degree(G))          # 6.87
 components(G)            # 1 component, so the graph is connected
 
 # Summary statistics (2-1) 
-transitivity(G)          # 0.236
+#transitivity = clustering coefficient
+transitivity(G)          # 0.236 (proportion of “two-step” connections that are also direct connections)
 edge_density(G)          # 2.6e-05
 
 # Comparison to ER graph with the same density (3-3)
