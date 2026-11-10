@@ -9,6 +9,7 @@ setwd("C:/GitHub/STAT-636-Network-Data")
 # ===================================================
 # DATA CLEANING
 # ===================================================
+# this is a random comment
 
 library(igraph)
 library(Matrix)
