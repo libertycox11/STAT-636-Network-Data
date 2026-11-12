@@ -20,19 +20,11 @@ library(igraph)
 library(Matrix)
 library(lattice)
 
-# Read the edge list, skipping the 4 comment lines
-edges_raw <- read.table("Amazon0302.txt", skip = 4, col.names = c("from", "to"))
+edges <- read.table("Amazon0302.txt", comment.char = "#", col.names = c("from", "to"))
+head(edges)
+G <- graph_from_edgelist(as.matrix(edges) + 1, directed = FALSE)  # SNAP ID:0 is a discontinued product
+G <- simplify(G)         # removes reciprocal duplicates and self-loops
 
-# Build directed first (as given in the raw file), then convert
-g_directed <- graph_from_data_frame(edges_raw, directed = TRUE)
-# g_directed <- graph_from_edgelist(as.matrix(edges_raw), directed = TRUE)
-
-# Convert to undirected, collapse duplicate edges, remove self-loops
-g <- as.undirected(g_directed, mode = "collapse")
-g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
-
-cat("Nodes:", vcount(g), "\n")
-cat("Edges:", ecount(g), "\n")
 ```
 
 # Method 1: Exploratory Network Characterization
@@ -43,23 +35,20 @@ cat("Edges:", ecount(g), "\n")
 # Exploratory Network Characterization
 # ===================================================
 
-# Adjacency Matrix (spot-check; full matrix is too large to plot)
-top50_ids  <- order(degree(g), decreasing = TRUE)[1:50]
-g_sub50    <- induced_subgraph(g, top50_ids)
-A_sub      <- get.adjacency(g_sub50)
-levelplot(as.matrix(A_sub),
-          main = "Adjacency Matrix: Top 50 Highest-Degree Products")
-
 # ------------------------------------------------------------
 # A. mean node degree (avg. # of connections a product has)
 #    & network density (proportion of possible connections that are present)
 # ------------------------------------------------------------
 
-num_nodes   <- vcount(g)
-num_edges   <- ecount(g)
-net_density <- edge_density(g, loops = FALSE)   # edge_density() -- 2-1
-mean_deg    <- mean(degree(g))                  # degree()       -- 1-1 / 2-1
-med_deg     <- median(degree(g))
+# Summary statistics (2-1) 
+# transitivity = clustering coefficient
+transitivity(G)          # 0.236 (proportion of “two-step” connections that are also direct connections)
+
+num_nodes   <- vcount(G)
+num_edges   <- ecount(G)
+net_density <- edge_density(G, loops = FALSE)   # edge_density() -- 2-1
+mean_deg    <- mean(degree(G))                  # degree()       -- 1-1 / 2-1
+med_deg     <- median(degree(G))
 
 cat("\n--- Global Network Properties ---\n")
 cat("Nodes             :", format(num_nodes, big.mark = ","), "\n")
@@ -119,6 +108,14 @@ cat("Transitivity:", round(transitivity(G_lcc),  4), "\n")
 #     disproportionate number of connections
 #            from 1-1 / 2-1 class notes
 # ------------------------------------------------------------
+# Degree distribution (1-1, 2-1) 
+degree_vals = 0:max(degree(G))
+plot(degree_vals, degree_distribution(G), log = "xy",
+     xlab = "Degree", ylab = "Proportion", main = "Degree distribution")
+
+
+
+
 deg_lcc <- degree(G_lcc) 
 
 # Skewness
@@ -229,4 +226,100 @@ cat(sprintf("  Degree Skewness      : %.4f\n", deg_skew))
 cat("========================================\n")
 
 ```
+
+
+## Rhea's code
+
+```{r}
+# # ===================================================
+#  ANALYSIS METHOD 1:
+# Exploratory Network Characterization
+# ===================================================
+
+# A. mean node degree (avg. # of connections a product has)
+#    & network density (proportion of possible connections that are present)
+
+edges <- read.table("Amazon0302.txt", comment.char = "#", col.names = c("from", "to"))
+# DROP ALL THE ZEROS HERE
+edges <- edges[edges[,1] != 0 & edges[,2] != 0, ]
+G <- graph_from_edgelist(as.matrix(edges), directed = FALSE)  
+
+#V(G)$name <- as.character(0:(vcount(G) - 1))
+G <- simplify(G)         # removes reciprocal duplicates and self-loops
+vcount(G); ecount(G)     # 262,110 nodes, 899,787 edges
+mean(degree(G))          # 6.87
+
+# Summary statistics (2-1) 
+# transitivity = clustering coefficient
+transitivity(G)          # 0.236 (proportion of “two-step” connections that are also direct connections)
+edge_density(G)          # 2.6e-05
+
+# Comparison to ER graph with the same density (3-3)
+G_np = sample_gnp(vcount(G), p = edge_density(G))
+transitivity(G_np)       # near 0, far below the real network
+```
+
+
+```{r}
+# B. check the network’s connectivity by identifying 
+#     i. product connections
+#     ii. product communities
+#     iii. the size of each community
+
+
+# C. examine the degree distribution for right skewness 
+#     to determine whether a small number of products hold a 
+#     disproportionate number of connections
+#            from 1-1 / 2-1 class notes
+
+# Degree distribution (1-1, 2-1) 
+degree_vals = 0:max(degree(G))
+plot(degree_vals, degree_distribution(G), log = "xy",
+     xlab = "Degree", ylab = "Proportion", main = "Degree distribution")
+
+# Explains the spike at degree 5: crawl recorded at most 5 co-purchases per product
+table(table(edges[, 1]))
+```
+
+```{r}
+# D. products w/ most connections ranked by degree centrality
+#       from 2-1 notes
+
+# Hill estimator and Hill plot (3-1) 
+deg = degree(G)
+
+t_min = 10
+Y = deg[which(deg >= t_min)]
+alpha = 1 + 1/mean(log(Y/(min(Y)-0.5)))
+alpha # 3.686922
+
+sort.deg = sort(deg, decreasing = T)
+alpha_t = sapply(1:5000, function(k) {
+  Y = sort.deg[1:k]
+  alpha = 1 + 1/mean(log(Y/sort.deg[k+1]))
+  alpha
+})
+plot(alpha_t, type = "l", ylim=c(3, 4.5),
+     xlab = "k(number of top products used)", ylab="Estimated alpha", main = "Hill plot")
+
+# Centrality (2-1)
+sort(degree(G), decreasing = T)[1:10] # highest # of connections (values only): 420 405 363 335 330 296 280 278 272 227
+
+# Products with highest connection values
+top = order(deg, decreasing = T)[1:10]
+data.frame(product_id = top, degree=deg[top])
+```
+
+
+
+
+# Method 2: Degree Corrected Stochastic Blockmodel (DCSBM)
+
+```{r}
+
+```
+
+
+
+
 
