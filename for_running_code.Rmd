@@ -17,6 +17,8 @@ library(rARPACK)
 ```
 
 
+# Method 1: Exploratory Network Characterization
+
 ```{r}
 # ===================================================
 #  ANALYSIS METHOD 1:
@@ -176,9 +178,7 @@ cat(sprintf("  Median degree            : %d\n",    median(degree(G))))
 cat(sprintf("  Max degree               : %d\n",    max(degree(G))))
 cat(sprintf("  Network density          : %.2e\n",  edge_density(G)))
 cat(sprintf("  Transitivity (real)      : %.4f\n",  transitivity(G)))
-cat(sprintf("  Transitivity (ER null)   : %.2e\n",  transitivity(G_np)))
-cat(sprintf("  Transitivity ratio       : %.1fx above random\n",
-            transitivity(G) / transitivity(G_np)))
+
 cat("----------------------------------------------------\n")
 cat(sprintf("  Power-law tail (alpha)   : %.4f\n",  alpha))
 cat(sprintf("  Tail threshold (t_min)   : %d\n",    t_min))
@@ -255,7 +255,9 @@ cat("====================================================\n")
 #
 # From 3.5 class notes:
 #   n, K, theta, B, z, Z are defined then used to build P
-
+G_comp <- components(G)
+vert_lcc <- V(G)[G_comp$membership == which.max(G_comp$csize)]
+G_lcc <- induced_subgraph(G,  vert_lcc)
 n_lcc <- vcount(G_lcc)   # number of nodes in the LCC
 
 # Number of communities K.
@@ -333,7 +335,11 @@ eig_scree <- eigs_sym(L_norm, k = K_max, which = "SM")
 eig_vals_sorted <- rev(eig_scree$values)
 
 # Scree plot -- plot(eig.L$values, main="Scree plot of L") from 2.2
-plot(1:K_max,
+graphics.off()
+dev.new()
+
+{
+plot(seq(eig_vals_sorted),
      eig_vals_sorted,
      type = "b",
      pch  = 19,
@@ -341,13 +347,10 @@ plot(1:K_max,
      main = "Scree Plot: Normalized Laplacian (DCSBM)\nLook for the elbow to confirm K",
      xlab = "Index (smallest eigenvalue to largest)",
      ylab = "Eigenvalue")
-abline(v   = K,
-       col = "red",
-       lty = 2)
+abline(v   = K, col = "red", lty = 2)
 text(K, max(eig_vals_sorted) * 0.5,
-     paste0("K = ", K),
-     col = "red",
-     adj = c(-0.2, 0))
+     paste0("K = ", K), col = "red", adj = c(-0.2, 0))
+}
 # WHAT TO LOOK FOR:
 # The scree plot shows eigenvalues of the normalized
 # Laplacian ordered from smallest to largest.
@@ -356,7 +359,10 @@ text(K, max(eig_vals_sorted) * 0.5,
 # communities. If the gap appears at index K = 4,
 # this confirms our choice. If the elbow is at a
 # different index, update K above accordingly.
+```
 
+
+```{r}
 # ===================================================
 # STEP 4: TOP-K EIGENVECTORS FOR DCSBM EMBEDDING
 # ===================================================
@@ -393,7 +399,7 @@ plot(V_K[, 1], V_K[, 2],
      pch  = 19,
      cex  = 0.3,
      col  = "grey60",
-     main = "DCSBM Spectral Embedding (before clustering)\nEigenvectors 1 & 2 of Normalized Laplacian",
+     main = "DCSBM Spectral Embedding (before clustering)",
      xlab = "Eigenvector 1 (Fiedler vector)",
      ylab = "Eigenvector 2")
 # WHAT TO LOOK FOR:
@@ -401,7 +407,10 @@ plot(V_K[, 1], V_K[, 2],
 # 2D plot indicate that the degree-corrected spectral
 # embedding has separated the communities. If 4 clouds
 # are visible, K = 4 is well-supported by the data.
+```
 
+
+```{r}
 # ===================================================
 # STEP 5: KMEANS CLUSTERING ON THE EMBEDDING
 # ===================================================
@@ -419,7 +428,7 @@ plot(V_K[, 1], V_K[, 2],
 # solution (lowest within-cluster variance) is kept.
 # This is important for stability on large networks.
 
-set.seed(636)
+set.seed(42)
 dcsbm_clusters <- kmeans(V_K,
                           centers  = K,
                           nstart   = 100,    # stability -- 3.4
@@ -429,7 +438,6 @@ dcsbm_clusters <- kmeans(V_K,
 # Pattern: plot(G, vertex.color = cluster) -- 2.2
 V(G_lcc)$cluster <- dcsbm_clusters
 
-cat("DCSBM clustering complete.\n")
 cat("Cluster sizes:\n")
 print(sort(table(dcsbm_clusters), decreasing = TRUE))
 
@@ -468,7 +476,9 @@ legend("topright",
 # structure that the DCSBM has successfully identified.
 # Mixed/overlapping colors = communities are less
 # distinct (may need a different K or model).
+```
 
+```{r}
 # ===================================================
 # STEP 7: REORDER ADJACENCY MATRIX BY COMMUNITY
 # ===================================================
@@ -510,7 +520,9 @@ levelplot(as.matrix(A_reordered),              # levelplot() -- 1.2 / 3.5
 # rarely co-purchase).
 # This is the visual confirmation that the DCSBM
 # block structure matches the data.
+```
 
+```{r}
 # ===================================================
 # STEP 8: ESTIMATE THE BLOCK MATRIX B
 # ===================================================
@@ -567,7 +579,10 @@ levelplot(B_hat,
 # entries, the communities are well-separated.
 # If diagonal ≈ off-diagonal, the block structure is
 # weak and communities may not be meaningful.
+```
 
+
+```{r}
 # ===================================================
 # STEP 9: DEGREE DISTRIBUTION WITHIN EACH COMMUNITY
 # ===================================================
@@ -604,7 +619,10 @@ par(mfrow = c(1, 1))
 # why DCSBM is needed. If all communities showed
 # uniform degree distributions, standard SBM would
 # have been sufficient.
+```
 
+
+```{r}
 # ===================================================
 # STEP 10: TOP PRODUCTS PER COMMUNITY (HUB NODES)
 # ===================================================
@@ -642,7 +660,7 @@ top_per_community <- lapply(1:K, function(k) {
   df <- data.frame(
     Community  = k,
     Rank       = 1:10,
-    Product_ID = V(G_lcc)$name[top10_global],  # original Amazon node ID
+    Product_ID = as.integer(top10_global),  # original Amazon node ID
     Degree     = deg_lcc[top10_global]
   )
   df
@@ -669,7 +687,9 @@ for (k in 1:K) {
 # successfully recovered the real category structure
 # from network topology alone -- without ever being
 # told what the categories were.
+```
 
+```{r}
 # ===================================================
 # STEP 11: MODULARITY OF THE DCSBM PARTITION
 # ===================================================
@@ -687,8 +707,7 @@ for (k in 1:K) {
 # method in your proposal -- we compute it here to give
 # a single comparable number for the DCSBM partition.
 
-modularity_dcsbm <- modularity(G_lcc,
-                                membership = dcsbm_clusters)
+modularity_dcsbm <- modularity(G_lcc, membership = dcsbm_clusters)
 
 cat(sprintf("\nDCSBM Modularity (K = %d): %.6f\n", K, modularity_dcsbm))
 
@@ -780,7 +799,10 @@ print(theta_summary, row.names = FALSE)
 #              A large sd confirms DCSBM was necessary
 # theta_mean = average connectivity level of products in this community
 #              Higher mean = more densely interconnected community
+```
 
+
+```{r}
 # ===================================================
 # FINAL SUMMARY OUTPUT
 # ===================================================
@@ -813,14 +835,8 @@ cat(sprintf("    Min  : %d\n",           min(theta))  )
 cat(sprintf("    Mean : %.3f\n",         mean(theta)) )
 cat(sprintf("    Max  : %d\n",           max(theta))  )
 cat(sprintf("    SD   : %.3f\n",         sd(theta))   )
-cat("----------------------------------------------------\n")
-cat("  Next step: parse amazon-meta.txt and run:\n")
-cat("    table(dcsbm_clusters, product_category)\n")
-cat("  to validate community-to-category alignment.\n")
 cat("====================================================\n")
 ```
-
-
 
 
 
