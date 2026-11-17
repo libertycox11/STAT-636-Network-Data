@@ -838,5 +838,411 @@ cat(sprintf("    SD   : %.3f\n",         sd(theta))   )
 cat("====================================================\n")
 ```
 
+## Changing K to something else
+
+```{r}
+G_comp <- components(G)
+vert_lcc <- V(G)[G_comp$membership == which.max(G_comp$csize)]
+G_lcc <- induced_subgraph(G,  vert_lcc)
+n_lcc <- vcount(G_lcc)   # number of nodes in the LCC
+
+K <- 6
+
+# Build sparse adjacency matrix (from 1.2 / 2.2 / 3.4)
+A_lcc <- get.adjacency(G_lcc)
+
+theta <- degree(G_lcc)          # observed degree = theta_i estimate
+
+degrees_lcc <- degree(G_lcc)
+D_lcc       <- Diagonal(x = degrees_lcc)          # sparse D    -- 2.2
+L_lcc       <- D_lcc - A_lcc                       # L = D - A   -- 2.2
+D_m12       <- Diagonal(x = degrees_lcc^(-1/2))   # D^{-1/2}    -- 2.2
+L_norm      <- D_m12 %*% L_lcc %*% D_m12          # L_norm      -- 2.2
+
+K_max <- 10
+
+eig_scree <- eigs_sym(L_norm, k = K_max, which = "SM")
+# Reverse so eigenvalues plot smallest -> largest
+eig_vals_sorted <- rev(eig_scree$values)
+
+# Scree plot -- plot(eig.L$values, main="Scree plot of L") from 2.2
+graphics.off()
+dev.new()
+
+{
+  plot(seq(eig_vals_sorted),
+       eig_vals_sorted,
+       type = "b",
+       pch  = 19,
+       col  = "steelblue",
+       main = "Scree Plot: Normalized Laplacian (DCSBM)\nLook for the elbow to confirm K",
+       xlab = "Index (smallest eigenvalue to largest)",
+       ylab = "Eigenvalue")
+  abline(v   = K, col = "red", lty = 2)
+  text(K, max(eig_vals_sorted) * 0.5,
+       paste0("K = ", K), col = "red", adj = c(-0.2, 0))
+}
+
+eig_K   <- eigs_sym(L_norm, k = K, which = "SM")
+
+# Reorder columns: smallest eigenvalue first
+# (same as [, n-1] indexing in script 2.2)
+V_K     <- eig_K$vectors[, K:1]    # n_lcc x K matrix of eigenvectors
+
+plot(V_K[, 1], V_K[, 2],
+     pch  = 19,
+     cex  = 0.3,
+     col  = "grey60",
+     main = "DCSBM Spectral Embedding (before clustering)",
+     xlab = "Eigenvector 1 (Fiedler vector)",
+     ylab = "Eigenvector 2")
+
+set.seed(42)
+dcsbm_clusters <- kmeans(V_K,
+                         centers  = K,
+                         nstart   = 100,    # stability -- 3.4
+                         iter.max = 500)$cluster
+
+V(G_lcc)$cluster <- dcsbm_clusters
+
+cat("Cluster sizes:\n")
+print(sort(table(dcsbm_clusters), decreasing = TRUE))
+
+plot(V_K[, 1], V_K[, 2],
+     col  = dcsbm_clusters,     # col = z pattern from 3.5
+     pch  = 19,
+     cex  = 0.3,
+     main = "DCSBM Spectral Embedding (after clustering)\nColored by Detected Community",
+     xlab = "Eigenvector 1 (Fiedler vector)",
+     ylab = "Eigenvector 2")
+legend("topright",
+       legend = paste("Community", 1:K),
+       col    = 1:K,
+       pch    = 19,
+       cex    = 0.8)
+
+
+top500_ids    <- order(degree(G_lcc), decreasing = TRUE)[1:500]
+A_sub500      <- A_lcc[top500_ids, top500_ids]
+cluster_sub   <- dcsbm_clusters[top500_ids]
+
+# index_order pattern from 3.5
+index_order   <- order(cluster_sub)
+A_reordered   <- A_sub500[index_order, index_order]
+
+levelplot(as.matrix(A_reordered),              # levelplot() -- 1.2 / 3.5
+          main       = "Reordered Adjacency Matrix (Top 500 Nodes)\nBlock Structure = DCSBM Communities",
+          xlab       = "Products (sorted by community)",
+          ylab       = "Products (sorted by community)",
+          col.regions = colorRampPalette(c("white", "steelblue"))(100))
+
+
+# Build hard assignment matrix tau (n x K) -- 3.4
+tau <- matrix(0, nrow = n_lcc, ncol = K)
+tau[cbind(1:n_lcc, dcsbm_clusters)] <- 1
+
+cluster_sizes <- apply(tau, 2, sum)   # apply(tau, 2, mean) -- 3.4
+
+# Numerator: observed edges between/within clusters
+B_num   <- crossprod(tau, crossprod(A_lcc, tau))    # 3.4 pattern
+
+# Denominator: possible edges (corrected for no self-loops)
+B_denom <- tcrossprod(cluster_sizes)                # 3.4 pattern
+diag(B_denom) <- cluster_sizes * (cluster_sizes - 1)
+
+B_hat <- as.matrix(B_num / B_denom)
+rownames(B_hat) <- paste0("C", 1:K)
+colnames(B_hat) <- paste0("C", 1:K)
+
+cat("\n--- Estimated DCSBM Block Probability Matrix (B_hat) ---\n")
+print(round(B_hat, 8))
+
+# levelplot of B_hat -- levelplot(P) pattern from 3.4 / 3.5
+levelplot(B_hat,
+          main       = "Estimated Block Probability Matrix B_hat\n(DCSBM: degree effects removed)",
+          xlab       = "Community",
+          ylab       = "Community",
+          col.regions = colorRampPalette(c("white", "steelblue"))(100))
+
+
+deg_lcc <- degree(G_lcc)
+
+par(mfrow = c(2, 2))   # 2x2 panel for K=4 communities
+for (k in 1:K) {
+  idx <- which(dcsbm_clusters == k)
+  hist(deg_lcc[idx],
+       breaks = 50,
+       col    = k,
+       border = "white",
+       main   = paste0("Community ", k,
+                       " (n = ", format(length(idx), big.mark=","), ")"),
+       xlab   = "Degree",
+       ylab   = "Count")
+}
+par(mfrow = c(1, 1))
+
+cat("\n--- Top 10 Hub Products Per Community ---\n")
+top_per_community <- lapply(1:K, function(k) {
+  # Get indices of all nodes in community k
+  idx <- which(dcsbm_clusters == k)
+  # Degrees of only the nodes in this community
+  deg_k <- deg_lcc[idx]
+  # Rank by degree, take top 10
+  # Pattern: top = order(deg, decreasing=T)[1:10] -- 2.1
+  top10_local  <- order(deg_k, decreasing = TRUE)[1:10]
+  top10_global <- idx[top10_local]   # map back to LCC node indices
+  
+  # Build output data frame
+  # Pattern: data.frame(product_id=top, degree=deg[top]) -- 2.1
+  df <- data.frame(
+    Community  = k,
+    Rank       = 1:10,
+    Product_ID = as.integer(top10_global),  # original Amazon node ID
+    Degree     = deg_lcc[top10_global]
+  )
+  df
+})
+
+# Print top 10 for each community
+for (k in 1:K) {
+  cat(sprintf("\nCommunity %d  (total products: %s)\n",
+              k,
+              format(sum(dcsbm_clusters == k), big.mark = ",")))
+  print(top_per_community[[k]][, c("Rank","Product_ID","Degree")],
+        row.names = FALSE)
+}
+
+
+modularity_dcsbm <- modularity(G_lcc, membership = dcsbm_clusters)
+cat(sprintf("\nDCSBM Modularity (K = %d): %.6f\n", K, modularity_dcsbm))
+# Community size table
+comm_sizes <- table(dcsbm_clusters)
+
+cat("\n--- Detected Community Sizes vs. Expected Category Sizes ---\n")
+size_comparison <- data.frame(
+  Community       = paste0("C", 1:K),
+  Detected_Size   = as.integer(comm_sizes),
+  Pct_of_LCC      = round(100 * as.integer(comm_sizes) / n_lcc, 2)
+)
+print(size_comparison, row.names = FALSE)
+
+cat("\nExpected approximate category sizes (from SNAP metadata):\n")
+cat("  Books  : ~167,000  (~63.8%)\n")
+cat("  Music  :  ~50,000  (~19.1%)\n")
+cat("  Video  :  ~26,000  (~9.9%)\n")
+cat("  DVD    :  ~19,000  (~7.3%)\n")
+cat("Match the largest detected community to Books,\n")
+cat("then rank the rest by size to suggest Music/Video/DVD.\n")
+
+
+cat("\n--- Theta (Degree Parameter) Summary Per Community ---\n")
+theta_summary <- do.call(rbind, lapply(1:K, function(k) {
+  idx <- which(dcsbm_clusters == k)
+  data.frame(
+    Community  = k,
+    Size       = length(idx),
+    theta_min  = min(theta[idx]),      # theta = deg_lcc from Step 2
+    theta_mean = round(mean(theta[idx]), 3),
+    theta_med  = median(theta[idx]),
+    theta_max  = max(theta[idx]),      # largest hub in this community
+    theta_sd   = round(sd(theta[idx]), 3)
+  )
+}))
+print(theta_summary, row.names = FALSE)
+
+
+# ===================================================
+# FINAL SUMMARY OUTPUT
+# ===================================================
+
+cat("\n")
+cat("====================================================\n")
+cat("   DCSBM COMMUNITY DETECTION SUMMARY\n")
+cat("====================================================\n")
+cat(sprintf("  Model                    : Degree-Corrected SBM\n"))
+cat(sprintf("  Embedding matrix         : Normalized Laplacian\n"))
+cat(sprintf("  Clustering method        : Spectral + k-means\n"))
+cat(sprintf("  Number of communities(K) : %d\n",    K))
+cat(sprintf("  Nodes analyzed (LCC)     : %s\n",
+            format(n_lcc, big.mark = ",")))
+cat(sprintf("  Modularity               : %.6f\n",  modularity_dcsbm))
+cat("----------------------------------------------------\n")
+cat("  Community sizes:\n")
+for (k in 1:K) {
+  cat(sprintf("    Community %d : %s nodes  (%.2f%%)\n",
+              k,
+              format(size_comparison$Detected_Size[k], big.mark = ","),
+              size_comparison$Pct_of_LCC[k]))
+}
+cat("----------------------------------------------------\n")
+cat("  Estimated Block Matrix B_hat:\n")
+print(round(B_hat, 8))
+cat("----------------------------------------------------\n")
+cat("  Theta (degree) range across full LCC:\n")
+cat(sprintf("    Min  : %d\n",           min(theta))  )
+cat(sprintf("    Mean : %.3f\n",         mean(theta)) )
+cat(sprintf("    Max  : %d\n",           max(theta))  )
+cat(sprintf("    SD   : %.3f\n",         sd(theta))   )
+cat("====================================================\n")
+```
+
+
+
+## Trying to match to parsed.txt
+
+```{r}
+# ===================================================
+# Load and parse MetaDataParsed.txt
+# ===================================================
+
+# Read the file line by line
+meta_lines <- readLines("MetaDataParsed.txt")
+
+# The file alternates between:
+#   "Id:   X"        --> product ID line
+#   "  title: ..."   --> title line (may be missing for some products)
+#   "  group: ..."   --> group/category line (may be missing for some products)
+# We parse all three and match them together by ID block.
+
+# Find line indices for each field
+id_idx    <- grep("^Id:",      meta_lines)
+title_idx <- grep("^  title:", meta_lines)
+group_idx <- grep("^  group:", meta_lines)
+
+# Extract values from each line type
+id_vals    <- as.integer(trimws(sub("Id:",      "", meta_lines[id_idx])))
+title_vals <- trimws(sub("^  title:", "", meta_lines[title_idx]))
+group_vals <- trimws(sub("^  group:", "", meta_lines[group_idx]))
+
+# ----------------------------------------------------
+# Match titles and groups back to their ID block.
+# Strategy: for each title/group line, find which Id
+# block it belongs to by finding the nearest preceding
+# "Id:" line index.
+# ----------------------------------------------------
+
+# For each title line, find the Id line that comes
+# just before it
+match_to_id <- function(field_idx, id_idx, id_vals) {
+  sapply(field_idx, function(fi) {
+    # which Id lines come before this field line?
+    preceding <- id_idx[id_idx < fi]
+    if (length(preceding) == 0) return(NA_integer_)
+    # the nearest preceding Id line
+    nearest_id_line <- max(preceding)
+    # return the actual ID value at that line
+    id_vals[id_idx == nearest_id_line]
+  })
+}
+
+title_ids <- match_to_id(title_idx, id_idx, id_vals)
+group_ids <- match_to_id(group_idx, id_idx, id_vals)
+
+# Build separate data frames for titles and groups
+title_df <- data.frame(
+  Product_ID       = as.integer(title_ids),
+  Product_Name     = title_vals,
+  stringsAsFactors = FALSE
+)
+
+group_df <- data.frame(
+  Product_ID       = as.integer(group_ids),
+  Product_Category = group_vals,
+  stringsAsFactors = FALSE
+)
+
+# Merge titles and groups by Product_ID
+# Products with no title or no group will have NA
+meta_df <- merge(title_df, group_df,
+                 by  = "Product_ID",
+                 all = TRUE)
+
+cat(sprintf("Metadata loaded: %d products with title/group info.\n",
+            nrow(meta_df)))
+cat("Category breakdown:\n")
+print(table(meta_df$Product_Category, useNA = "ifany"))
+
+# ===================================================
+# Top 10 Hub Products Per Community WITH metadata
+# ===================================================
+
+cat("\n--- Top 10 Hub Products Per Community ---\n")
+
+top_per_community <- lapply(1:K, function(k) {
+
+  # Get indices of all nodes in community k
+  idx <- which(dcsbm_clusters == k)
+
+  # Degrees of only the nodes in this community
+  deg_k <- deg_lcc[idx]
+
+  # Rank by degree, take top 10
+  # Pattern: top = order(deg, decreasing=T)[1:10] -- 2.1
+  top10_local  <- order(deg_k, decreasing = TRUE)[1:10]
+  top10_global <- idx[top10_local]
+
+  # Build base data frame
+  # Pattern: data.frame(product_id=top, degree=deg[top]) -- 2.1
+  df <- data.frame(
+    Community  = k,
+    Rank       = 1:10,
+    Product_ID = as.integer(top10_global),
+    Degree     = deg_lcc[top10_global],
+    stringsAsFactors = FALSE
+  )
+
+  # Merge with metadata to attach name and category
+  df <- merge(df, meta_df,
+              by  = "Product_ID",
+              all.x = TRUE)   # keep all top-10 rows even if no metadata match
+
+  # Restore original rank order after merge (merge can shuffle rows)
+  df <- df[order(df$Rank), ]
+
+  # Replace any unmatched NAs with readable labels
+  df$Product_Name[is.na(df$Product_Name)]         <- "[Title not found]"
+  df$Product_Category[is.na(df$Product_Category)] <- "[Category not found]"
+
+  df
+})
+
+# ===================================================
+# Print the enriched table for each community
+# ===================================================
+
+for (k in 1:K) {
+
+  cat(sprintf("\nCommunity %d  (total products: %s)\n",
+              k,
+              format(sum(dcsbm_clusters == k), big.mark = ",")))
+
+  # Select and reorder columns for clean console output
+  out <- top_per_community[[k]][, c("Rank",
+                                     "Product_ID",
+                                     "Product_Name",
+                                     "Product_Category",
+                                     "Degree")]
+
+  # Truncate long product names so the table stays readable
+  # (adjust width as needed)
+  out$Product_Name <- strtoi(nchar(out$Product_Name))  # get lengths first
+  out$Product_Name <- substr(top_per_community[[k]]$Product_Name,
+                              1, 45)
+
+  # Add "..." suffix for any name that was truncated
+  original_names <- top_per_community[[k]]$Product_Name
+  out$Product_Name <- ifelse(
+    nchar(original_names) > 45,
+    paste0(substr(original_names, 1, 42), "..."),
+    original_names
+  )
+
+  print(out, row.names = FALSE)
+}
+```
+
+
+
+# Method 3: Louvain
 
 
