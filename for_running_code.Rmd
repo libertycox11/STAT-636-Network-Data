@@ -1243,6 +1243,27 @@ for (k in 1:K) {
 
 
 
-# Method 3: Louvain
+# Method 3: Louvain 
+I added this code but haven't tested it yet (Aysegul on 11/16):)
+
+```{r}
+set.seed(1) 
+cl = cluster_louvain(G)
+
+length(cl)                                    # number of communities found
+modularity(cl)                                # Q of the final partition
+summary(as.numeric(sizes(cl)))                # how big the communities are
+head(sort(sizes(cl), decreasing = TRUE), 10)  # the 10 largest communities
+
+memb = membership(cl)                         # community of each product (named by SNAP ID)
+
+# The hierarchy: one row per level, from small early groups to the final ones
+dim(cl$memberships)
+
+# More, smaller communities (resolution > 1) or fewer, larger ones (< 1)
+cl_fine = cluster_louvain(G, resolution = 2)
+length(cl_fine)
+```
+
 
 
