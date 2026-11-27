@@ -38,14 +38,12 @@ sum(degree(G) == 0)                   # number of isolated products: should be 0
 d[which.max(f_d)]                     # should be 5
 
 
-
-
 # check out the highest degree and understand the degree distribution
-max(degree(G))        # the highest degree
-sum(degree(G) == 420) # how many products have exactly 420 links
+max(degree(G))        # 420; the highest degree
+sum(degree(G) == 420) # 1; how many products have exactly 420 links
 sum(degree(G) > 10)   # number of products with more than 10 links
-mean(degree(G) > 10)  # their share of all products
-median(degree(G))     # 50% of the products have degree <= 6! (skewness sign)
+mean(degree(G) > 10)  # 0.09742856; their share of all products
+median(degree(G))     # 6; 50% of the products have degree <= 6! (skewness sign)
 
 barplot(f_d)
 #zoom in on the degree distribution barplot
@@ -57,7 +55,6 @@ barplot(f_d[1:(max_show + 1)],
 # Because the degree distribution is right-skewed, this mean is pulled up
 # by a few very popular products; a typical product has fewer links
 # (median = 6). Each product's own "Also Bought" list has at most 5 items.
-
 
 
 ##########################
